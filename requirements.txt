@@ -1,0 +1,7 @@
+colorama==0.3.9
+dictmysql==0.6.5
+pprint==0.1
+PyMySQL==0.7.11
+tabulate==0.7.7
+termcolor==1.1.0
+tqdm==4.14.0
