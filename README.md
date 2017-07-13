@@ -2,6 +2,10 @@
 
 Perform bulk server command execution and validations over ssh in an organised and efficient way.
 
+### Demo
+
+[Watch demo in youtube](https://youtu.be/WiU5vcbMvVU)
+
 ### Requirements
 
 * Python 3.6 (with python-devel)
