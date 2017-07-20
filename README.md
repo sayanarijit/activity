@@ -41,6 +41,7 @@ vim /var/www/html/activity/application/config/database.php
 
 * Give passwordless sudo access to 'apache' user by making the following entry in `/etc/sudoers`
 ``` bash
+Defaults: apache !requiretty
 apache ALL=(ALL) NOPASSWD:ALL
 ```
 
