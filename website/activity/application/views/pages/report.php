@@ -1,6 +1,5 @@
 <?php
 $tableids = array();
-
 foreach ($actions as $action => $report) {
   if ($action == "ping_check")
   {
@@ -42,11 +41,11 @@ foreach ($actions as $action => $report) {
         if (endswith("64", $line1)){
           $rep["Arch"][$host] = "64 bit";
           $arc = "64 bit";
-          $table[$action][] = array($host,"Accessible","Linux","N/A",$arc);
+          $table[$action][] = array($host,"Accessible","Linux",$rep["Version/Release"][$host],$arc);
         }else{
           $rep["Arch"][$host] = "32 bit";
           $arc = "32 bit";
-          $table[$action][] = array($host,"Accessible","Linux",explode("\n", $r["stdout"])[1],$arc);
+          $table[$action][] = array($host,"Accessible","Linux",$rep["Version/Release"][$host],$arc);
         };
       }else{
         $rep["SSH status"][$host] = "Accessible";
@@ -212,7 +211,6 @@ foreach ($actions as $action => $report) {
       </div>
     <?php ;}; ?>
   </div>
-
   <!--- Controls --->
   <div class="row">
     <div class="col-md-12 col-sm-12 col-xs-12">
@@ -238,7 +236,6 @@ foreach ($actions as $action => $report) {
       </div>
     </div>
   </div>
-
   <!--- Tables --->
   <div class="row">
     <div class="col-md-12 col-sm-12 col-xs-12">
@@ -297,7 +294,6 @@ foreach ($actions as $action => $report) {
                               $this->load->view('pages/table',$data);
                             ?>
                           </div>
-
                           <?php
                             // Raw output
                             if (in_array(explode(" ",$action)[0], array("ping_check","os_check","id_and_homedir_check:","mount_check:",)))
@@ -309,7 +305,6 @@ foreach ($actions as $action => $report) {
                                 echo "</div>";
                             };
                             ?>
-
                           <div role="tabpanel" class="tab-pane fade in" id="<?php echo $elem; ?>-stats">
                           </div>
                         </div>
