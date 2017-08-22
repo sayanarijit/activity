@@ -12,6 +12,7 @@ SSH_KEY = "/root/.ssh/id_rsa" # Private key for passwordless ssh auth *Should no
 EXTRA_OPTIONS = ["-o", "StrictHostKeyChecking=no"] # Applies to both ssh and scp
 TIMEOUT = 120 # Applies to both ssh, scp
 THREADS_THRESHOLD = 200 # Maximum number of parallel threads allowed per activity
+WEBLINK = "http://localhost/activity" # If mentioned, it will be visible in interactive mode
 
 # ---------------------------------------------------------------------
 
@@ -455,6 +456,7 @@ class Activity_Interactive(Activity):
         print("-"*cols)
 
         if len(self.hosts) > 0:
+            if WEBLINK: print((WEBLINK+"/"+self.user+"/"+self.reportid).center(cols))
             # Ping check
             print(x("Ping check stats"),"Ping check stats")
             if self.display == "Ping check stats":
