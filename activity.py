@@ -521,7 +521,7 @@ class Activity_Interactive(Activity):
                 del self.activities["console_check"]
                 print(x("Console check stats"),"Console check stats")
                 if self.display == "Console check stats":
-                    found = [c for c in console_check_report if c["exit_code"] == 0]
+                    found = [c["hostname"] for c in console_check_report if c["exit_code"] == 0]
                     p = []
                     p.append([x("All hosts",self.hosts),".  All hosts:", len(self.hosts)])
                     p.append([])
