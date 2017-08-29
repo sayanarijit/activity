@@ -31,7 +31,7 @@ class Pages extends CI_Controller {
       # Home page
       if (isset($_POST["title"])&&(!empty($_POST["title"]))){
         $title = preg_replace("/[^A-Za-z0-9-]/","_",$_POST["title"]);
-        if(in_array($title, $data["reportids"]["apache"])){
+        if(in_array($title, $data["reportids"]["web"])){
           show_error("Title '".$_POST["title"]."' already exists in database. Try another title");
           die();
         }
