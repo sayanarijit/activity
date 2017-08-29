@@ -73,7 +73,7 @@ foreach ($actions as $action => $report) {
       if($r["exit_code"] == 0){
         $console_available[] = $host;
         $rep["Console available"][$host] = "Yes";
-        $rep["Consoles"][$host] = $host."-".implode("<br>".$host."-",json_decode($r["stdout"]));
+        $rep["Consoles"][$host] = implode("<br>",json_decode($r["stdout"]));
         $table[$action][] = array($host,"Yes",$rep["Consoles"][$host]);
       }else{
         $console_unavailable[]  = $host;
