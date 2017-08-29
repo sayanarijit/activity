@@ -177,6 +177,7 @@ class Activity:
         for con in cons:
             cmd = ["/bin/ping", "-c1", "-w1", host+"-"+con]
             proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
+            proc.communicate()
             if proc.returncode == 0:
                 exit_code = 0
                 available.append(host+"-"+con)
@@ -240,8 +241,7 @@ class Activity:
             t.start()
             threads.append(t)
             if (len(threads) % self.threads_threshold) == 0:
-                while len([th for th in threads if th.isAlive() == True]) >= self.threads_threshold:
-                    time.sleep(.5)
+                time.sleep(5)
         for t in tqdm(threads,desc='Finishing console check', leave=True, ascii=True, mininterval=0.5, miniters=1):
             t.join()
         while not q.empty():
