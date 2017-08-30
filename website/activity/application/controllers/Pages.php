@@ -9,9 +9,9 @@ class Pages extends CI_Controller {
     parent::__construct();
   }
 
-	public function view_page( $page = "home",$param1 = null,$param2 = null )
-	{
-		// Function to load a page
+  public function view_page( $page = "home",$param1 = null,$param2 = null )
+  {
+    // Function to load a page
 
     $data['title'] = $page." ".$param1;
 
@@ -31,11 +31,12 @@ class Pages extends CI_Controller {
       # Home page
       if (isset($_POST["title"])&&(!empty($_POST["title"]))){
         $title = preg_replace("/[^A-Za-z0-9-]/","_",$_POST["title"]);
-        if(in_array($title, $data["reportids"]["web"])){
+        if(in_array("web", array_keys($data["reportids"])) && in_array($title, $data["reportids"]["web"]))
+	{
           show_error("Title '".$_POST["title"]."' already exists in database. Try another title");
           die();
         }
-        $cmd = "/bin/sudo ".script_path()." -id ".$title;
+        $cmd = "sudo ".script_path()." -id ".$title;
         $cmd .= " -hosts ".str_replace("\n"," ",preg_replace("/[^A-Za-z0-9.-]/","\n",$_POST["hosts"]));
         $cmd .= " -ping_check";
         $cmd .= isset($_POST["os_check"]) ? " -os_check" : "";
@@ -83,5 +84,5 @@ class Pages extends CI_Controller {
     }else{
       show_404();
     }
-	}
+  }
 }
