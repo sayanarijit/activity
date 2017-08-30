@@ -39,10 +39,13 @@ mysql -u root -p < activity.sql
 vim /var/www/html/activity/application/config/database.php
 ```
 
-* Give passwordless sudo access to 'apache' user by making the following entry in `/etc/sudoers`
+* Give passwordless sudo access to web user by making the following entry in `/etc/sudoers`
 ``` bash
 Defaults:apache !requiretty
-apache ALL=(ALL) NOPASSWD:ALL
+apache ALL=(ALL) NOPASSWD:ALL     # For Fedora based system
+
+Defaults:www-data !requiretty
+www-data ALL=(ALL) NOPASSWD:ALL   # For Debian based system
 ```
 
 * Run script
