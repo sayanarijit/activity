@@ -141,7 +141,7 @@ class Activity:
     def _exec_single(self, host, extra_options, action, command, q):
         cmd = ["/bin/sshpass", "-p", self.password]
         if self.sudo:
-            cmd += ["/bin/sudo"]
+            cmd += ["sudo"]
         cmd += ["/bin/ssh","-q","-l",self.username,"-i",self.ssh_key] + extra_options + [host, command]
 
         proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
