@@ -17,6 +17,7 @@ Perform bulk server command execution and validations over ssh in an organised a
 ### Install, configure and run on localhost
 
 * Download and setup main script
+
 ``` bash
 mkdir -p /script/virtualenv
 cd /script
@@ -30,16 +31,19 @@ vim activity.py
 ```
 
 * Import database
+
 ``` bash
 mysql -u root -p < activity.sql
 ```
 
 * Configure website
+
 ``` bash
 vim /var/www/html/activity/application/config/database.php
 ```
 
-* Give passwordless sudo access to web user by making the following entry in `/etc/sudoers`
+* Give passwordless sudo access to web user by making the following entry in ***/etc/sudoers***
+
 ``` bash
 Defaults:apache !requiretty
 apache ALL=(ALL) NOPASSWD:ALL     # For Fedora based system
@@ -49,6 +53,7 @@ www-data ALL=(ALL) NOPASSWD:ALL   # For Debian based system
 ```
 
 * Run script
+
 ``` bash
 sudo ./activity.py
 ```
