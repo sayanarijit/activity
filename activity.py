@@ -257,9 +257,10 @@ class Activity:
         if isinstance(command, list):
             command = ";".join(command)
 
-        self.db.delete(table="reports",where={"user": self.user,
-                                              "reportid": self.reportid,
-                                              "action": action})
+        if not action.startswith("execute: "):
+            self.db.delete(table="reports",where={"user": self.user,
+                                                  "reportid": self.reportid,
+                                                  "action": action})
         threads = []
         q = queue.Queue()
         output = []
