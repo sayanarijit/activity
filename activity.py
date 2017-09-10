@@ -20,6 +20,7 @@ import sys
 from pprint import pprint
 import subprocess
 import os
+import shutil
 import threading
 import getpass
 import queue
@@ -45,6 +46,7 @@ class Activity:
     def __init__(self, hosts=[], reportid=None, sudo=SUDO, username=USERNAME, password=PASSWORD,
                  ssh_key=SSH_KEY, dbhost=DBHOST, dbuser=DBUSER, dbpassword=DBPASSWORD,
                  extra_options=EXTRA_OPTIONS, timeout=TIMEOUT, threads_threshold=THREADS_THRESHOLD):
+
         try:
             self.db = DictMySQL(db='activity', host=dbhost, user=dbuser, passwd=dbpassword, cursorclass=cursors.DictCursor)
         except:
@@ -69,6 +71,8 @@ class Activity:
         self.extra_options = extra_options
         self.timeout = timeout
         self.seperator = "[---x---]"  # Separates command outputs
+
+        self.prereq_check() # Check if requirements are met
         self.createtables()
 
         if self.reportid in self.list():
@@ -83,6 +87,15 @@ class Activity:
         else:
             self.hosts = [h.strip().lower() for h in set(hosts) if h and h != "" and len(h.split()) == 1]
             self.ping_check()
+
+    def prereq_check(self):
+        req_tools = ["sudo", "ping", "ssh", "scp", "sshpass"]
+        for tool in req_tools[:]:
+            if shutil.which(tool) is not None:
+                req_tools.remove(tool)
+        if len(req_tools) > 0:
+            print("ERROR: Following commands not found in system path: "+(", ".join(req_tools)))
+            quit()
 
     def createtables(self):
         if "reports" in [f["table_name"] for f in self.db.table_name()]:
@@ -139,10 +152,10 @@ class Activity:
         return True
 
     def _exec_single(self, host, extra_options, action, command, q):
-        cmd = ["/bin/sshpass", "-p", self.password]
+        cmd = ["sshpass", "-p", self.password]
         if self.sudo:
-            cmd += ["sudo"]
-        cmd += ["/bin/ssh","-q","-l",self.username,"-i",self.ssh_key] + extra_options + [host, command]
+            cmd += ["sudo","-n","--"]
+        cmd += ["ssh","-q","-l",self.username,"-i",self.ssh_key] + extra_options + [host, command]
 
         proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
         try:
@@ -160,7 +173,7 @@ class Activity:
 
     def _ping_single(self, host, q):
         action = "ping_check"
-        cmd = ["/bin/ping", "-c1", "-w1", host]
+        cmd = ["ping", "-c1", "-w1", host]
         proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
         outs, errs = proc.communicate()
         outs, errs = outs.decode("utf-8"), errs.decode("utf-8")
@@ -175,7 +188,7 @@ class Activity:
         available = []
         exit_code = 1
         for con in cons:
-            cmd = ["/bin/ping", "-c1", "-w1", host+"-"+con]
+            cmd = ["ping", "-c1", "-w1", host+"-"+con]
             proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
             proc.communicate()
             if proc.returncode == 0:
@@ -301,10 +314,10 @@ class Activity:
         self.db.delete(table="reports", where={"user":self.user,"reportid":self.reportid,"action": action})
 
         for host in tqdm(self.reachable_hosts, desc='Coping files over ssh', leave=True, ascii=True, mininterval=0.5, miniters=1):
-            cmd = ["/bin/sshpass", "-p", self.password]
+            cmd = ["sshpass", "-p", self.password]
             if self.sudo:
-                cmd += ["/bin/sudo"]
-            cmd += ["/bin/scp","-i",self.ssh_key] + self.extra_options
+                cmd += ["sudo"]
+            cmd += ["scp","-i",self.ssh_key] + self.extra_options
             cmd += ["-pr", localpath, self.username+"@"+host+":"+remotepath]
             outs, errs, exit_code = "", "", 1
             proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
@@ -856,20 +869,28 @@ class Activity_Interactive(Activity):
                             osreport.append(dict(hostname=hostname,os="N/A",kernel="N/A",kernel_release="N/A",
                                                 arch="N/A",dist="N/A"))
                     kernels = set([o["os"] for o in osreport if o["hostname"] in self.reachable_hosts])
+                    comm = []
                     for k in kernels:
                         hosts = [o["hostname"] for o in osreport if o["os"] == k]
                         if self.confirm("Is the command same for all "+k+" variants like '"+hosts[0]+"'..."):
                             command = input("Enter command: ").strip()
+                            print()
                             if len(command) > 0:
-                                self.execute(action="execute: "+title,hosts=hosts,command=command)
+                                comm.append([command, hosts])
                         else:
                             dists = set([o["dist"] for o in osreport if o["os"] == k and o["dist"] != ""])
                             for d in dists:
                                 hosts = [o["hostname"] for o in osreport if o["os"] == k and o["dist"] == d]
                                 print("\tLet's execute on only "+k+"("+d+") based hosts like '"+hosts[0]+"'...")
                                 command = input("\tEnter command: ").strip()
+                                print()
                                 if len(command) > 0:
-                                    self.execute(action="execute: "+title,hosts=hosts,command=command)
+                                    comm.append([command, hosts])
+                    if len(comm) > 0:
+                        for command, hosts in comm:
+                            self.execute(action="execute: "+title,hosts=hosts,command=command)
+                    else:
+                        print("SKIPPED: Nothing to execute")
                 else:
                     print("SKIPPED: Invalid title")
 
