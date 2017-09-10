@@ -12,7 +12,7 @@ Perform bulk server command execution and validations over ssh in an organised a
 * virtualenv
 * sshpass
 * [phpMyAdmin](https://www.phpmyadmin.net/) & [Apache server](https://httpd.apache.org) configured for [codeigniter](https://codeigniter.com) installation
-* Password less sudo access to 'apache' user
+* Password less sudo access to 'apache'/'www-data' user
 
 ### Install, configure and run on localhost
 
