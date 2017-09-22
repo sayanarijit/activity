@@ -11,7 +11,7 @@ PASSWORD = "dummy" # Remote login password *Should not be blank*
 SSH_KEY = "/root/.ssh/id_rsa" # Private key for passwordless ssh auth *Should not be blank*
 EXTRA_OPTIONS = ["-o", "StrictHostKeyChecking=no"] # Applies to both ssh and scp
 TIMEOUT = 120 # Applies to both ssh, scp
-THREADS_THRESHOLD = 200 # Maximum number of parallel threads allowed per activity
+THREADS_THRESHOLD = 50 # Maximum number of parallel threads allowed per activity
 WEBLINK = "http://localhost/activity" # If mentioned, it will be visible in interactive mode
 
 # ---------------------------------------------------------------------
@@ -33,6 +33,7 @@ import json
 import textwrap
 import datetime
 import re
+from shlex import quote
 import collections
 from tabulate import tabulate
 from termcolor import colored
@@ -40,6 +41,7 @@ import colorama
 from dictmysql import DictMySQL, cursors
 colorama.init()
 
+threadLimiter = threading.BoundedSemaphore(THREADS_THRESHOLD)
 
 class Activity:
 
@@ -152,11 +154,13 @@ class Activity:
         return True
 
     def _exec_single(self, host, extra_options, action, command, q):
+        command = "/bin/sh -c "+quote(command)
         cmd = ["sshpass", "-p", self.password]
         if self.sudo:
             cmd += ["sudo","-n","--"]
         cmd += ["ssh","-q","-l",self.username,"-i",self.ssh_key] + extra_options + [host, command]
 
+        threadLimiter.acquire()
         proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
         try:
             outs, errs = proc.communicate(timeout=self.timeout)
@@ -167,6 +171,7 @@ class Activity:
             outs, errs = "", "ssh: failed to connect"
             exit_code = 1
         finally:
+            threadLimiter.release()
             result = dict(user=self.user, reportid=self.reportid, action=action, hostname=host,
                           command=command, stdout=outs, stderr=errs, exit_code=exit_code)
             q.put(result)
@@ -174,12 +179,14 @@ class Activity:
     def _ping_single(self, host, q):
         action = "ping_check"
         cmd = ["ping", "-c1", "-w1", host]
+        threadLimiter.acquire()
         proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
         outs, errs = proc.communicate()
         outs, errs = outs.decode("utf-8"), errs.decode("utf-8")
         exit_code = proc.returncode
         result = dict(user=self.user, reportid=self.reportid, action=action, hostname=host,
                       command=" ".join(cmd), stdout=outs, stderr=errs, exit_code=exit_code)
+        threadLimiter.release()
         q.put(result)
 
     def _console_check_single(self, host, q):
@@ -189,8 +196,10 @@ class Activity:
         exit_code = 1
         for con in cons:
             cmd = ["ping", "-c1", "-w1", host+"-"+con]
+            threadLimiter.acquire()
             proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
             proc.communicate()
+            threadLimiter.release()
             if proc.returncode == 0:
                 exit_code = 0
                 available.append(host+"-"+con)
@@ -200,6 +209,7 @@ class Activity:
 
     def _port_scan_single(self, host, port, q):
         action = "port_scan: " + str(port)
+        threadLimiter.acquire()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(self.timeout)
         try:
@@ -211,6 +221,7 @@ class Activity:
         finally:
             sock.settimeout(None)
             sock.close()
+            threadLimiter.release()
         result = dict(user=self.user, reportid=self.reportid, action=action,
                       hostname=host, command=port, exit_code=exit_code)
         q.put(result)
@@ -228,9 +239,6 @@ class Activity:
             t = threading.Thread(target=self._ping_single, args=(h, q))
             t.start()
             threads.append(t)
-            if (len(threads) % self.threads_threshold) == 0:
-                while len([th for th in threads if th.isAlive() == True]) >= self.threads_threshold:
-                    time.sleep(.5)
         for t in tqdm(threads,desc='Finishing ping', leave=True, ascii=True, mininterval=0.5, miniters=1):
             t.join()
         while not q.empty():
@@ -253,8 +261,6 @@ class Activity:
             t = threading.Thread(target=self._console_check_single, args=(h, q))
             t.start()
             threads.append(t)
-            if (len(threads) % self.threads_threshold) == 0:
-                time.sleep(5)
         for t in tqdm(threads,desc='Finishing console check', leave=True, ascii=True, mininterval=0.5, miniters=1):
             t.join()
         while not q.empty():
@@ -281,9 +287,6 @@ class Activity:
             t = threading.Thread(target=self._exec_single, args=(h, self.extra_options, action, command, q))
             t.start()
             threads.append(t)
-            if (len(threads) % self.threads_threshold) == 0:
-                while len([th for th in threads if th.isAlive() == True]) >= self.threads_threshold:
-                    time.sleep(.5)
         for t in tqdm(threads,desc='Finishing command> '+textwrap.shorten(command, width=40), leave=True, ascii=True, mininterval=0.5, miniters=1):
             t.join()
         while not q.empty():
@@ -347,7 +350,7 @@ class Activity:
             "cat /etc/sudoers.d/*", "cat /usr/local/etc/sudoers", "cat /usr/local/etc/sudoers.d/*"
         ]
         action = "dump_config"
-        command = (";echo "+self.seperator+";").join(commands)
+        command = "/bin/sh -c "+quote((";echo "+self.seperator+";").join(commands))
         output = self.execute(hosts=self.reachable_hosts,command=command,action=action)
         return output
 
@@ -380,9 +383,6 @@ class Activity:
                 t = threading.Thread(target=self._port_scan_single, args=(h,port, q))
                 t.start()
                 threads.append(t)
-                if (len(threads) % self.threads_threshold) == 0:
-                    while len([th for th in threads if th.isAlive() == True]) >= self.threads_threshold:
-                        time.sleep(.5)
             for t in tqdm(threads,desc='Finishing port scan on '+str(port), leave=True, ascii=True, mininterval=0.5, miniters=1):
                 t.join()
             while not q.empty():
