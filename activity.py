@@ -41,7 +41,6 @@ import colorama
 from dictmysql import DictMySQL, cursors
 colorama.init()
 
-threadLimiter = threading.BoundedSemaphore(THREADS_THRESHOLD)
 
 class Activity:
 
@@ -61,7 +60,7 @@ class Activity:
             self.reportid = datetime.datetime.now().strftime("%d%B%y-%Hh%Mm%Ss")
         else:
             self.reportid = re.sub("[^a-zA-Z0-9-]","_",reportid).lower()
-        self.threads_threshold = threads_threshold
+        self.threadLimiter = threading.BoundedSemaphore(threads_threshold)
         try:
             self.user = os.getlogin()
         except:
@@ -160,7 +159,7 @@ class Activity:
             cmd += ["sudo","-n","--"]
         cmd += ["ssh","-q","-l",self.username,"-i",self.ssh_key] + extra_options + [host, command]
 
-        threadLimiter.acquire()
+        self.threadLimiter.acquire()
         proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
         try:
             outs, errs = proc.communicate(timeout=self.timeout)
@@ -171,7 +170,7 @@ class Activity:
             outs, errs = "", "ssh: failed to connect"
             exit_code = 1
         finally:
-            threadLimiter.release()
+            self.threadLimiter.release()
             result = dict(user=self.user, reportid=self.reportid, action=action, hostname=host,
                           command=command, stdout=outs, stderr=errs, exit_code=exit_code)
             q.put(result)
@@ -179,14 +178,14 @@ class Activity:
     def _ping_single(self, host, q):
         action = "ping_check"
         cmd = ["ping", "-c1", "-w1", host]
-        threadLimiter.acquire()
+        self.threadLimiter.acquire()
         proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
         outs, errs = proc.communicate()
         outs, errs = outs.decode("utf-8"), errs.decode("utf-8")
         exit_code = proc.returncode
         result = dict(user=self.user, reportid=self.reportid, action=action, hostname=host,
                       command=" ".join(cmd), stdout=outs, stderr=errs, exit_code=exit_code)
-        threadLimiter.release()
+        self.threadLimiter.release()
         q.put(result)
 
     def _console_check_single(self, host, q):
@@ -196,10 +195,10 @@ class Activity:
         exit_code = 1
         for con in cons:
             cmd = ["ping", "-c1", "-w1", host+"-"+con]
-            threadLimiter.acquire()
+            self.threadLimiter.acquire()
             proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
             proc.communicate()
-            threadLimiter.release()
+            self.threadLimiter.release()
             if proc.returncode == 0:
                 exit_code = 0
                 available.append(host+"-"+con)
@@ -209,7 +208,7 @@ class Activity:
 
     def _port_scan_single(self, host, port, q):
         action = "port_scan: " + str(port)
-        threadLimiter.acquire()
+        self.threadLimiter.acquire()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(self.timeout)
         try:
@@ -221,7 +220,7 @@ class Activity:
         finally:
             sock.settimeout(None)
             sock.close()
-            threadLimiter.release()
+            self.threadLimiter.release()
         result = dict(user=self.user, reportid=self.reportid, action=action,
                       hostname=host, command=port, exit_code=exit_code)
         q.put(result)
