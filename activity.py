@@ -1047,11 +1047,12 @@ class Activity_CLI(Activity):
             self.parser.print_help()
 
 
-if len(sys.argv) > 1:
-    # Enter non-interactive mode
-    a = Activity_CLI()
-    a.run()
-else:
-    # Enter interactive mode
-    a = Activity_Interactive()
-    a.interact()
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        # Enter non-interactive mode
+        a = Activity_CLI()
+        a.run()
+    else:
+        # Enter interactive mode
+        a = Activity_Interactive()
+        a.interact()
