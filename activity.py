@@ -1033,7 +1033,7 @@ class Activity_CLI(Activity):
                 print(json.dumps(output,indent=2))
             if results.command:
                 a.ssh_check()
-                output = a.execute(hosts=a.reachable_hosts,command=results.command)
+                output = a.execute(hosts=a.reachable_hosts,action="execute: "+results.command,command=results.command)
                 print(json.dumps(output,indent=2))
             if results.clean or not results.reportid:
                 a.clean()
