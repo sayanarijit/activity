@@ -86,7 +86,7 @@ class Activity:
             self.reachable_hosts = [f["hostname"] for f in self.report if f["action"] == "os_check" and f["stdout"] != ""]
             self.unreachable_hosts = [f["hostname"] for f in self.report if f["action"] == "os_check" and f["stdout"] == ""]
         else:
-            self.hosts = [h.strip().lower() for h in set(hosts) if h and h != "" and len(h.split()) == 1]
+            self.hosts = list(set([h.strip().lower() for h in hosts if h.strip() and len(h.split()) == 1]))
             self.ping_check()
 
     def prereq_check(self):
