@@ -349,7 +349,7 @@ class Activity:
             "cat /etc/sudoers.d/*", "cat /usr/local/etc/sudoers", "cat /usr/local/etc/sudoers.d/*"
         ]
         action = "dump_config"
-        command = "/bin/sh -c "+quote((";echo "+self.seperator+";").join(commands))
+        command = (";echo "+self.seperator+";").join(commands)
         output = self.execute(hosts=self.reachable_hosts,command=command,action=action)
         return output
 
