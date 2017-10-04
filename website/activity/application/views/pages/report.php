@@ -111,7 +111,7 @@ foreach ($actions as $action => $report) {
     $table[$action] = array(array("Hostname", "Command", "Stdout", "Stderr", "Exit code"));
     foreach($report->result_array() as $r){
       $host = $r["hostname"];
-      $title = explode(" ",$action)[1];
+      $title = explode("execute: ",$action)[1];
       $rep[$title.": command"][$host] = $r["command"];
       $rep[$title.": stdout"][$host] = $r["stdout"];
       $rep[$title.": stderr"][$host] = $r["stderr"];
@@ -134,7 +134,7 @@ foreach ($actions as $action => $report) {
     $table[$action] = array(array("Hostname", "SCP status"));
     foreach($report->result_array() as $r){
       $host = $r["hostname"];
-      $path = explode(" ",$action)[1];
+      $path = explode("scp: ",$action)[1];
       $rep["SCP status: ".$path][$host] = (($r["exit_code"]==0) ? "Success" : "Failed");
       $table[$action][] = array($host, (($r["exit_code"]==0) ? "Success" : "Failed"));
     };
@@ -162,7 +162,7 @@ foreach ($actions as $action => $report) {
     $table[$action] = array(array("Hostname", "ID present", "Homedir present", "Has write permission"));
     foreach($report->result_array() as $r){
       $host = $r["hostname"];
-      $u = explode(" ",$action)[1];
+      $u = explode("id_and_homedir_check: ",$action)[1];
       $id = $rep["ID present: ".$u][$host] = (count(explode("\n",$r["stdout"])) > 2) ? "Yes" : "No";
       if ($id == "Yes"){
         $home = $rep["Homedir present: ".$u][$host] = (count(explode("\n",$r["stdout"])) > 3) ? "Yes" : "No";
