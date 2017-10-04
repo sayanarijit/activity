@@ -177,7 +177,7 @@ class Activity:
 
     def _ping_single(self, host, q):
         action = "ping_check"
-        cmd = ["ping", "-c1", "-w1", host]
+        cmd = ["ping", "-c1", "-w5", host]
         self.threadLimiter.acquire()
         proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
         outs, errs = proc.communicate()
