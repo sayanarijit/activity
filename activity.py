@@ -147,7 +147,7 @@ class Activity:
         new_id = re.sub("[^a-zA-Z0-9-]","_",new_id)
         if not new_id or new_id == "" or new_id in self.list():
             return False
-        self.db.update(table="reports",value={"reportid": new_id},where={"user":self.user})
+        self.db.update(table="reports",value={"reportid": new_id},where={"user":self.user, "reportid": self.reportid})
         self.reportid = new_id
         self.reload()
         return True
