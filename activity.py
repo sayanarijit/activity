@@ -221,9 +221,34 @@ class Activity:
             sock.settimeout(None)
             sock.close()
             self.threadLimiter.release()
-        result = dict(user=self.user, reportid=self.reportid, action=action,
-                      hostname=host, command=port, exit_code=exit_code)
-        q.put(result)
+            result = dict(user=self.user, reportid=self.reportid, action=action,
+                          hostname=host, command=port, exit_code=exit_code)
+            q.put(result)
+
+    def _scp_single(self, host, localpath, remotepath, q):
+        action = "scp: '"+localpath+"' -> '"+remotepath+"'"
+        cmd = ["sshpass", "-p", self.password]
+        if self.sudo:
+            cmd += ["sudo"]
+        cmd += ["scp","-i",self.ssh_key] + self.extra_options
+        cmd += ["-pr", localpath, self.username+"@"+host+":"+remotepath]
+        outs, errs, exit_code = "", "", 1
+        self.threadLimiter.acquire()
+        proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
+        try:
+            outs, errs = proc.communicate(timeout=self.timeout)
+            outs, errs = outs.decode("utf-8"), errs.decode("utf-8")
+            exit_code = proc.returncode
+        except:
+            proc.kill()
+            outs, errs = "", "scp: failed to connect"
+            exit_code = 1
+        finally:
+            self.threadLimiter.release()
+            result = dict(user=self.user, reportid=self.reportid, action=action, hostname=host,
+                          command=" ".join(cmd).replace(self.password,"***"),
+                          stdout=outs, stderr=errs, exit_code=exit_code)
+            q.put(result)
 
     def ping_check(self):
         if len(self.hosts) == 0:
@@ -315,28 +340,20 @@ class Activity:
         output = []
         self.db.delete(table="reports", where={"user":self.user,"reportid":self.reportid,"action": action})
 
-        for host in tqdm(self.reachable_hosts, desc='Coping files over ssh', leave=True, ascii=True, mininterval=0.5, miniters=1):
-            cmd = ["sshpass", "-p", self.password]
-            if self.sudo:
-                cmd += ["sudo"]
-            cmd += ["scp","-i",self.ssh_key] + self.extra_options
-            cmd += ["-pr", localpath, self.username+"@"+host+":"+remotepath]
-            outs, errs, exit_code = "", "", 1
-            proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
-            try:
-                outs, errs = proc.communicate(timeout=self.timeout)
-                outs, errs = outs.decode("utf-8"), errs.decode("utf-8")
-                exit_code = proc.returncode
-            except:
-                proc.kill()
-                outs, errs = "", "scp: failed to connect"
-                exit_code = 1
-            finally:
-                result = dict(user=self.user, reportid=self.reportid, action=action, hostname=host,
-                              command=" ".join(cmd).replace(self.password,"***"),
-                              stdout=outs, stderr=errs, exit_code=exit_code)
-                self.db.insert(table="reports",value=result)
-                output.append(result)
+        threads = []
+        q = queue.Queue()
+        output = []
+        for h in tqdm(self.hosts,desc='Starting scp', leave=True, ascii=True, mininterval=0.5, miniters=1):
+            t = threading.Thread(target=self._scp_single, args=(h, localpath, remotepath, q,))
+            t.start()
+            threads.append(t)
+        for t in tqdm(threads,desc='Finishing scp', leave=True, ascii=True, mininterval=0.5, miniters=1):
+            t.join()
+        while not q.empty():
+            output.append(q.get())
+        for t in tqdm(output,desc='Updating database', leave=True, ascii=True, mininterval=0.5, miniters=1):
+            self.db.insert(table="reports", value=t)
+        self.reload()
         return output
 
     def dump_config(self):
