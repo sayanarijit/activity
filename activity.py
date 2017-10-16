@@ -820,7 +820,7 @@ class Activity_Interactive(Activity):
                     ports = [int(p) for p in set(input("Enter space separated ports to scan: ").strip().split())]
                     if len(ports) > 0:
                         self.port_scan(ports=ports)
-                except Exception as e:
+                except:
                     print("SKIPPED: Invalid input")
 
             if inp[0] == "scp":
@@ -940,7 +940,7 @@ class Activity_CLI(Activity):
                             help='maximum allowed time in seconds for each execution (default: '+str(TIMEOUT)+')')
 
         self.parser.add_argument('-threads', dest='threads_threshold', type=int,  default=TIMEOUT,
-                            help='maximum number of threads allowed (default: '+str(THREADS_THRESHOLD)+')')
+                            help='maximum number of threads allowed (default: '+str(PARALLEL_LIMIT)+')')
 
         self.parser.add_argument('-sudo', dest='sudo', default="yes",
                             help='whether to use `sudo ssh`: [yes/no] (default: '+("yes" if SUDO else "no")+')')
