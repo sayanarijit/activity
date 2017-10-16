@@ -17,7 +17,7 @@ PASSWORD = "dummy" # Remote login password *Should not be blank*
 SSH_KEY = "/root/.ssh/id_rsa" # Private key for passwordless ssh auth *Should not be blank*
 EXTRA_OPTIONS = ["-o", "StrictHostKeyChecking=no"] # Applies to both ssh and scp
 TIMEOUT = 120 # Applies to both ssh, scp
-THREADS_THRESHOLD = 100 # Maximum number of parallel threads allowed per activity
+PARALLEL_LIMIT = 200 # Maximum number of parallel workers allowed per activity
 WEBLINK = "http://localhost/activity" # If mentioned, it will be visible in interactive mode
 
 # ---------------------------------------------------------------------
@@ -27,9 +27,8 @@ from pprint import pprint
 import subprocess
 import os
 import shutil
-import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import getpass
-import queue
 import time
 from tqdm import tqdm, trange
 from subprocess import Popen, PIPE
@@ -48,11 +47,107 @@ from dictmysql import DictMySQL, cursors
 colorama.init()
 
 
+# Define functions to be used by multiprocessing
+
+def _ping_single(args):
+    host, user, reportid = args
+    action = "ping_check"
+    cmd = ["ping", "-c1", "-w5", host]
+    proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
+    outs, errs = proc.communicate()
+    outs, errs = outs.decode("utf-8"), errs.decode("utf-8")
+    exit_code = proc.returncode
+    result = dict(user=user, reportid=reportid, action=action, hostname=host,
+                  command=" ".join(cmd), stdout=outs, stderr=errs, exit_code=exit_code)
+    return result
+
+def _exec_single(args):
+    host, user, reportid, action, command = args
+    command = "/bin/sh -c "+quote(command)
+    cmd = ["sshpass", "-p", PASSWORD]
+    if SUDO:
+        cmd += ["sudo","-n","--"]
+    cmd += ["ssh","-q","-l",USERNAME,"-i",SSH_KEY] + EXTRA_OPTIONS + [host, command]
+
+    proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
+    try:
+        outs, errs = proc.communicate(timeout=TIMEOUT)
+        outs, errs = outs.decode("utf-8"), errs.decode("utf-8")
+        exit_code = proc.returncode
+    except:
+        proc.kill()
+        outs, errs = "", "ssh: failed to connect"
+        exit_code = 1
+    finally:
+        result = dict(user=user, reportid=reportid, action=action, hostname=host,
+                      command=command, stdout=outs, stderr=errs, exit_code=exit_code)
+        return result
+
+def _console_check_single(args):
+    host, user, reportid = args
+    action = "console_check"
+    cons = ["ilo", "con", "imm", "ilom", "alom", "xscf", "power"]
+    action = "console_check"
+    available = []
+    exit_code = 1
+    for con in cons:
+        cmd = ["ping", "-c1", "-w5", host+"-"+con]
+        proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
+        proc.communicate()
+        if proc.returncode == 0:
+            exit_code = 0
+            available.append(host+"-"+con)
+    result = dict(user=user, reportid=reportid, action=action, hostname=host,
+                  command=json.dumps(cons), stdout=json.dumps(available), stderr="", exit_code=exit_code)
+    return result
+
+def _port_scan_single(args):
+    host, user, reportid, port = args
+    action = "port_scan: " + str(port)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(TIMEOUT)
+    try:
+        exit_code = sock.connect_ex((host, port))
+        sock.settimeout(None)
+    except:
+        exit_code = 1
+        closed_ports.append(port)
+    finally:
+        sock.settimeout(None)
+        sock.close()
+        result = dict(user=user, reportid=reportid, action=action,
+                      hostname=host, command=port, exit_code=exit_code)
+        return result
+
+def _scp_single(args):
+    host, user, reportid, localpath, remotepath = args
+    action = "scp: '"+localpath+"' -> '"+remotepath+"'"
+    cmd = ["sshpass", "-p", PASSWORD]
+    if SUDO:
+        cmd += ["sudo"]
+    cmd += ["scp","-i",SSH_KEY] + EXTRA_OPTIONS
+    cmd += ["-pr", localpath, USERNAME+"@"+host+":"+remotepath]
+    outs, errs, exit_code = "", "", 1
+    proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
+    try:
+        outs, errs = proc.communicate(timeout=TIMEOUT)
+        outs, errs = outs.decode("utf-8"), errs.decode("utf-8")
+        exit_code = proc.returncode
+    except:
+        proc.kill()
+        outs, errs = "", "scp: failed to connect"
+        exit_code = 1
+    finally:
+        result = dict(user=user, reportid=reportid, action=action, hostname=host,
+                      command=" ".join(cmd).replace(PASSWORD,"***"),
+                      stdout=outs, stderr=errs, exit_code=exit_code)
+        return result
+
 class Activity:
 
     def __init__(self, hosts=[], reportid=None, sudo=SUDO, username=USERNAME, password=PASSWORD,
                  ssh_key=SSH_KEY, dbhost=DBHOST, dbuser=DBUSER, dbpassword=DBPASSWORD,
-                 extra_options=EXTRA_OPTIONS, timeout=TIMEOUT, threads_threshold=THREADS_THRESHOLD):
+                 extra_options=EXTRA_OPTIONS, timeout=TIMEOUT, process_limit=PARALLEL_LIMIT):
 
         try:
             self.db = DictMySQL(db='activity', host=dbhost, user=dbuser, passwd=dbpassword, cursorclass=cursors.DictCursor)
@@ -66,7 +161,6 @@ class Activity:
             self.reportid = datetime.datetime.now().strftime("%d%B%y-%Hh%Mm%Ss")
         else:
             self.reportid = re.sub("[^a-zA-Z0-9-]","_",reportid).lower()
-        self.threadLimiter = threading.BoundedSemaphore(threads_threshold)
         try:
             self.user = os.getlogin()
         except:
@@ -77,8 +171,8 @@ class Activity:
         self.ssh_key = ssh_key
         self.extra_options = extra_options
         self.timeout = timeout
+        self.process_limit = process_limit
         self.seperator = "[---x---]"  # Separates command outputs
-
         self.prereq_check() # Check if requirements are met
         self.createtables()
 
@@ -158,179 +252,62 @@ class Activity:
         self.reload()
         return True
 
-    def _exec_single(self, host, extra_options, action, command, q):
-        command = "/bin/sh -c "+quote(command)
-        cmd = ["sshpass", "-p", self.password]
-        if self.sudo:
-            cmd += ["sudo","-n","--"]
-        cmd += ["ssh","-q","-l",self.username,"-i",self.ssh_key] + extra_options + [host, command]
-
-        self.threadLimiter.acquire()
-        proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
-        try:
-            outs, errs = proc.communicate(timeout=self.timeout)
-            outs, errs = outs.decode("utf-8"), errs.decode("utf-8")
-            exit_code = proc.returncode
-        except:
-            proc.kill()
-            outs, errs = "", "ssh: failed to connect"
-            exit_code = 1
-        finally:
-            self.threadLimiter.release()
-            result = dict(user=self.user, reportid=self.reportid, action=action, hostname=host,
-                          command=command, stdout=outs, stderr=errs, exit_code=exit_code)
-            q.put(result)
-
-    def _ping_single(self, host, q):
-        action = "ping_check"
-        cmd = ["ping", "-c1", "-w5", host]
-        self.threadLimiter.acquire()
-        proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
-        outs, errs = proc.communicate()
-        outs, errs = outs.decode("utf-8"), errs.decode("utf-8")
-        exit_code = proc.returncode
-        result = dict(user=self.user, reportid=self.reportid, action=action, hostname=host,
-                      command=" ".join(cmd), stdout=outs, stderr=errs, exit_code=exit_code)
-        self.threadLimiter.release()
-        q.put(result)
-
-    def _console_check_single(self, host, q):
-        cons = ["ilo", "con", "imm", "ilom", "alom", "xscf", "power"]
-        action = "console_check"
-        available = []
-        exit_code = 1
-        for con in cons:
-            cmd = ["ping", "-c1", "-w1", host+"-"+con]
-            self.threadLimiter.acquire()
-            proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
-            proc.communicate()
-            self.threadLimiter.release()
-            if proc.returncode == 0:
-                exit_code = 0
-                available.append(host+"-"+con)
-        result = dict(user=self.user, reportid=self.reportid, action=action, hostname=host,
-                      command=json.dumps(cons), stdout=json.dumps(available), stderr="", exit_code=exit_code)
-        q.put(result)
-
-    def _port_scan_single(self, host, port, q):
-        action = "port_scan: " + str(port)
-        self.threadLimiter.acquire()
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(self.timeout)
-        try:
-            exit_code = sock.connect_ex((host, port))
-            sock.settimeout(None)
-        except:
-            exit_code = 1
-            closed_ports.append(port)
-        finally:
-            sock.settimeout(None)
-            sock.close()
-            self.threadLimiter.release()
-            result = dict(user=self.user, reportid=self.reportid, action=action,
-                          hostname=host, command=port, exit_code=exit_code)
-            q.put(result)
-
-    def _scp_single(self, host, localpath, remotepath, q):
-        action = "scp: '"+localpath+"' -> '"+remotepath+"'"
-        cmd = ["sshpass", "-p", self.password]
-        if self.sudo:
-            cmd += ["sudo"]
-        cmd += ["scp","-i",self.ssh_key] + self.extra_options
-        cmd += ["-pr", localpath, self.username+"@"+host+":"+remotepath]
-        outs, errs, exit_code = "", "", 1
-        self.threadLimiter.acquire()
-        proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=False)
-        try:
-            outs, errs = proc.communicate(timeout=self.timeout)
-            outs, errs = outs.decode("utf-8"), errs.decode("utf-8")
-            exit_code = proc.returncode
-        except:
-            proc.kill()
-            outs, errs = "", "scp: failed to connect"
-            exit_code = 1
-        finally:
-            self.threadLimiter.release()
-            result = dict(user=self.user, reportid=self.reportid, action=action, hostname=host,
-                          command=" ".join(cmd).replace(self.password,"***"),
-                          stdout=outs, stderr=errs, exit_code=exit_code)
-            q.put(result)
-
     def ping_check(self):
-        if len(self.hosts) == 0:
-            return []
+        if len(self.hosts) == 0: return []
+        output = []
         self.db.delete(table="reports",where={"user": self.user,
                                               "reportid": self.reportid,
                                               "action": "ping_check"})
-        output = []
-        threads = []
-        q = queue.Queue()
-        for h in tqdm(self.hosts,desc='Starting ping', leave=True, ascii=True, mininterval=0.5, miniters=1):
-            t = threading.Thread(target=self._ping_single, args=(h, q))
-            t.start()
-            threads.append(t)
-        for t in tqdm(threads,desc='Finishing ping', leave=True, ascii=True, mininterval=0.5, miniters=1):
-            t.join()
-        while not q.empty():
-            output.append(q.get())
-        for t in tqdm(output,desc='Updating database', leave=True, ascii=True, mininterval=0.5, miniters=1):
-            self.db.insert(table="reports", value=t)
+        with ThreadPoolExecutor(max_workers=PARALLEL_LIMIT) as pool:
+            futures = [pool.submit(_ping_single, [h,self.user,self.reportid]) for h in self.hosts]
+            for f in tqdm(as_completed(futures), desc='Pinging hosts', leave=True,
+                          ascii=True, mininterval=0.5, miniters=1, total=len(self.hosts)):
+                self.db.insert(table="reports", value=f.result())
+                output.append(f.result())
         self.reload()
         return output
 
     def console_check(self):
-        if len(self.hosts) == 0:
-            return []
+        if len(self.hosts) == 0: return []
+        output = []
         self.db.delete(table="reports",where={"user": self.user,
                                               "reportid": self.reportid,
                                               "action": "console_check"})
-        output = []
-        threads = []
-        q = queue.Queue()
-        for h in tqdm(self.hosts,desc='Starting console check', leave=True, ascii=True, mininterval=0.5, miniters=1):
-            t = threading.Thread(target=self._console_check_single, args=(h, q))
-            t.start()
-            threads.append(t)
-        for t in tqdm(threads,desc='Finishing console check', leave=True, ascii=True, mininterval=0.5, miniters=1):
-            t.join()
-        while not q.empty():
-            output.append(q.get())
-        for t in tqdm(output,desc='Updating database', leave=True, ascii=True, mininterval=0.5, miniters=1):
-            self.db.insert(table="reports", value=t)
+        with ThreadPoolExecutor(max_workers=PARALLEL_LIMIT) as pool:
+            output = []
+            futures = [pool.submit(_console_check_single, [h,self.user,self.reportid]) for h in self.hosts]
+            for f in tqdm(as_completed(futures), desc='Pinging consoles', leave=True,
+                          ascii=True, mininterval=0.5, miniters=1, total=len(self.hosts)):
+                self.db.insert(table="reports", value=f.result())
+                output.append(f.result())
         self.reload()
         return output
 
     def execute(self, hosts, command, action="execute"):
-        if len(hosts) == 0:
-            return []
-        if isinstance(command, list):
-            command = ";".join(command)
-
+        if len(hosts) == 0: return []
+        output = []
+        if isinstance(command, list): command = ";".join(command)
+        if action == "os_check":
+            desc = "SSH/OS check"
+        else:
+            desc = "Executing remote command"
         if not action.startswith("execute: "):
             self.db.delete(table="reports",where={"user": self.user,
                                                   "reportid": self.reportid,
                                                   "action": action})
-        threads = []
-        q = queue.Queue()
-        output = []
-        for h in tqdm(hosts,desc='Starting command> '+textwrap.shorten(command, width=40), leave=True, ascii=True, mininterval=0.5, miniters=1):
-            t = threading.Thread(target=self._exec_single, args=(h, self.extra_options, action, command, q))
-            t.start()
-            threads.append(t)
-        for t in tqdm(threads,desc='Finishing command> '+textwrap.shorten(command, width=40), leave=True, ascii=True, mininterval=0.5, miniters=1):
-            t.join()
-        while not q.empty():
-            output.append(q.get())
-        for t in tqdm(output,desc='Updating database', leave=True, ascii=True, mininterval=0.5, miniters=1):
-            self.db.insert(table="reports", value=t)
+        with ThreadPoolExecutor(max_workers=PARALLEL_LIMIT) as pool:
+            output = []
+            futures = [pool.submit(_exec_single, [h,self.user,self.reportid,action,command]) for h in hosts]
+            for f in tqdm(as_completed(futures), desc=desc, leave=True,
+                          ascii=True, mininterval=0.5, miniters=1, total=len(hosts)):
+                self.db.insert(table="reports", value=f.result())
+                output.append(f.result())
         self.reload()
         return output
 
     def os_check(self):
-        if self.up_hosts == None or len(self.up_hosts) == 0:
-            self.ping_check()
-        if self.up_hosts == None or len(self.up_hosts) == 0:
-            return []
+        if self.up_hosts == None or len(self.up_hosts) == 0: self.ping_check()
+        if self.up_hosts == None or len(self.up_hosts) == 0: return []
         action = "os_check"
         command = "uname -srm; python -c 'import platform; print(\" \".join(platform.dist()));'"
         output = self.execute(hosts=self.up_hosts, command=command, action=action)
@@ -342,23 +319,19 @@ class Activity:
 
     def scp(self, localpath, remotepath="~/"):
         self.ssh_check()
+        output = []
         action = "scp: '"+localpath+"' -> '"+remotepath+"'"
-        output = []
-        self.db.delete(table="reports", where={"user":self.user,"reportid":self.reportid,"action": action})
+        self.db.delete(table="reports",
+                       where={"user":self.user,"reportid":self.reportid,"action": action})
 
-        threads = []
-        q = queue.Queue()
-        output = []
-        for h in tqdm(self.hosts,desc='Starting scp', leave=True, ascii=True, mininterval=0.5, miniters=1):
-            t = threading.Thread(target=self._scp_single, args=(h, localpath, remotepath, q,))
-            t.start()
-            threads.append(t)
-        for t in tqdm(threads,desc='Finishing scp', leave=True, ascii=True, mininterval=0.5, miniters=1):
-            t.join()
-        while not q.empty():
-            output.append(q.get())
-        for t in tqdm(output,desc='Updating database', leave=True, ascii=True, mininterval=0.5, miniters=1):
-            self.db.insert(table="reports", value=t)
+        with ThreadPoolExecutor(max_workers=PARALLEL_LIMIT) as pool:
+            output = []
+            futures = [pool.submit(_scp_single, [h, self.user, self.reportid, localpath, remotepath])
+                       for h in self.reachable_hosts]
+            for f in tqdm(as_completed(futures), desc='Copying over scp', leave=True,
+                          ascii=True, mininterval=0.5, miniters=1, total=len(self.reachable_hosts)):
+                self.db.insert(table="reports", value=f.result())
+                output.append(f.result())
         self.reload()
         return output
 
@@ -395,22 +368,21 @@ class Activity:
         return output
 
     def port_scan(self, ports):
+        if len(self.up_hosts) == 0: return []
         output = []
-        threads = []
-        q = queue.Queue()
         for port in ports:
-            self.db.delete(table="reports",where={"user":self.user,"reportid": self.reportid,
-                                                  "action": "port_scan: " + str(port)})
-            for h in tqdm(self.up_hosts, desc='Starting port scan on '+str(port), leave=True, ascii=True, mininterval=0.5, miniters=1):
-                t = threading.Thread(target=self._port_scan_single, args=(h,port, q))
-                t.start()
-                threads.append(t)
-            for t in tqdm(threads,desc='Finishing port scan on '+str(port), leave=True, ascii=True, mininterval=0.5, miniters=1):
-                t.join()
-            while not q.empty():
-                output.append(q.get())
-        for t in tqdm(output,desc='Updating database', leave=True, ascii=True, mininterval=0.5, miniters=1):
-            self.db.insert(table="reports", value=t)
+            action = "port_scan: "+ str(port)
+            self.db.delete(table="reports",where={"user": self.user,
+                                                  "reportid": self.reportid,
+                                                  "action": action})
+            with ThreadPoolExecutor(max_workers=PARALLEL_LIMIT) as pool:
+                output = []
+                futures = [pool.submit(_port_scan_single, [h,self.user,self.reportid,port])
+                           for h in self.up_hosts]
+                for f in tqdm(as_completed(futures), desc='Scanning port '+str(port), leave=True,
+                              ascii=True, mininterval=0.5, miniters=1, total=len(self.up_hosts)):
+                    self.db.insert(table="reports", value=f.result())
+                    output.append(f.result())
         self.reload()
         return output
 
@@ -848,7 +820,7 @@ class Activity_Interactive(Activity):
                     ports = [int(p) for p in set(input("Enter space separated ports to scan: ").strip().split())]
                     if len(ports) > 0:
                         self.port_scan(ports=ports)
-                except:
+                except Exception as e:
                     print("SKIPPED: Invalid input")
 
             if inp[0] == "scp":
