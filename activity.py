@@ -1,36 +1,34 @@
 #!/script/virtualenv/py3.6/bin/python
 # -*-coding: utf-8 -*-
+
 """
-Author:         Arijit Basu
-Email:          sayanarijit@gmail.com
-Documentation:  https://sayanarijit.github.io/activity
+Author          : Arijit Basu
+Email           : sayanarijit@gmail.com
+Documentation   : https://sayanarijit.github.io/activity
 """
 
 # --------------------------- CONFIGURATION ---------------------------
 
-DBHOST = "localhost" # Databse hosted on
-DBUSER = "root" # Database user
-DBPASSWORD = "" # Database password
-SUDO = True # Whether to use "sudo ssh hostname" or just "ssh hostname"
-USERNAME = "root" # Remote login user
-PASSWORD = "dummy" # Remote login password *Should not be blank*
-SSH_KEY = "/root/.ssh/id_rsa" # Private key for passwordless ssh auth *Should not be blank*
-EXTRA_OPTIONS = ["-o", "StrictHostKeyChecking=no"] # Applies to both ssh and scp
-TIMEOUT = 120 # Applies to both ssh, scp
-PARALLEL_LIMIT = 200 # Maximum number of parallel workers allowed per activity
-WEBLINK = "http://localhost/activity" # If mentioned, it will be visible in interactive mode
+DBHOST = "localhost"                                # Databse hosted on
+DBUSER = "root"                                     # Database user
+DBPASSWORD = ""                                     # Database password
+SUDO = True                                         # Whether to use "sudo ssh hostname" or just "ssh hostname"
+USERNAME = "root"                                   # Remote login user
+PASSWORD = "dummy"                                  # Remote login password *Should not be blank*
+SSH_KEY = "/root/.ssh/id_rsa"                       # Private key for passwordless ssh auth *Should not be blank*
+EXTRA_OPTIONS = ["-o", "StrictHostKeyChecking=no"]  # Applies to both ssh and scp
+TIMEOUT = 120                                       # Applies to both ssh, scp
+PARALLEL_LIMIT = 200                                # Maximum number of parallel workers allowed per activity
+WEBLINK = "http://localhost/activity"               # If mentioned, it will be visible in interactive mode
 
 # ---------------------------------------------------------------------
 
 import sys
-from pprint import pprint
-import subprocess
 import os
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import getpass
-import time
-from tqdm import tqdm, trange
+from tqdm import tqdm
 from subprocess import Popen, PIPE
 import argparse
 import socket
@@ -39,7 +37,6 @@ import textwrap
 import datetime
 import re
 from shlex import quote
-import collections
 from tabulate import tabulate
 from termcolor import colored
 import colorama
@@ -111,7 +108,6 @@ def _port_scan_single(args):
         sock.settimeout(None)
     except:
         exit_code = 1
-        closed_ports.append(port)
     finally:
         sock.settimeout(None)
         sock.close()
@@ -545,7 +541,7 @@ class Activity_Interactive(Activity):
                     if self.display == "ID and home directory check stats":
                         p = []
                         p.append([x("SSH reachable hosts",self.reachable_hosts),".  SSH reachable hosts:",str(len(self.reachable_hosts))])
-                        ids = set([r["command"].split()[3] for r in id_check_report])
+                        ids = set([r["command"].split()[5] for r in id_check_report])
                         for idx in ids:
                             this_id_report = [r for r in id_check_report if r["command"].split()[3] == idx]
                             id_present = [r["hostname"] for r in this_id_report if len(r["stdout"].splitlines()) > 1]
@@ -990,7 +986,6 @@ class Activity_CLI(Activity):
 
     def run(self):
         results = self.parser.parse_args()
-        hosts = results.hosts
 
         if len(results.hosts) > 0 or results.reportid or results.list:
             if results.sudo.lower() in ["n", "no"]:
@@ -998,7 +993,7 @@ class Activity_CLI(Activity):
             else:
                 sudo = True
 
-            a = Activity(hosts=results.hosts, reportid=results.reportid, sudo=results.sudo, username=results.username, password=results.password,
+            a = Activity(hosts=results.hosts, reportid=results.reportid, sudo=sudo, username=results.username, password=results.password,
                          dbuser=results.dbuser, dbpassword=results.dbpassword, timeout=results.timeout)
 
             if results.ping_check:
