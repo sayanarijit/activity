@@ -543,7 +543,7 @@ class Activity_Interactive(Activity):
                         p.append([x("SSH reachable hosts",self.reachable_hosts),".  SSH reachable hosts:",str(len(self.reachable_hosts))])
                         ids = set([r["command"].split()[5] for r in id_check_report])
                         for idx in ids:
-                            this_id_report = [r for r in id_check_report if r["command"].split()[3] == idx]
+                            this_id_report = [r for r in id_check_report if r["command"].split()[5] == idx]
                             id_present = [r["hostname"] for r in this_id_report if len(r["stdout"].splitlines()) > 1]
                             home_present = [r["hostname"] for r in this_id_report if len(r["stdout"].splitlines()) > 2]
                             has_permission = [r["hostname"] for r in this_id_report if len(r["stdout"].splitlines()) > 3]
